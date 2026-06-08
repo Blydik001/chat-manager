@@ -7,6 +7,7 @@ def init_db():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     
+    # Роли пользователей в чатах
     c.execute('''
         CREATE TABLE IF NOT EXISTS user_roles (
             user_id INTEGER,
@@ -16,15 +17,19 @@ def init_db():
         )
     ''')
     
+    # Глобальные баны (по группам бесед)
     c.execute('''
         CREATE TABLE IF NOT EXISTS global_bans (
-            user_id INTEGER PRIMARY KEY,
+            user_id INTEGER,
+            group_id INTEGER,
             reason TEXT,
             banned_by INTEGER,
-            banned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            banned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (user_id, group_id)
         )
     ''')
     
+    # Ники
     c.execute('''
         CREATE TABLE IF NOT EXISTS nicknames (
             user_id INTEGER,
@@ -34,6 +39,7 @@ def init_db():
         )
     ''')
     
+    # Приветствия
     c.execute('''
         CREATE TABLE IF NOT EXISTS welcome_settings (
             chat_id INTEGER PRIMARY KEY,
@@ -41,6 +47,7 @@ def init_db():
         )
     ''')
     
+    # Фильтр слов
     c.execute('''
         CREATE TABLE IF NOT EXISTS banned_words (
             chat_id INTEGER,
@@ -49,19 +56,10 @@ def init_db():
         )
     ''')
     
-    # Таблица для связывания бесед (чатов) в одну группу
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS linked_chats (
-            group_id INTEGER,
-            chat_id INTEGER,
-            PRIMARY KEY (group_id, chat_id)
-        )
-    ''')
-    
     conn.commit()
     conn.close()
 
-# Роли (без изменений)
+# === РОЛИ ===
 def set_role(user_id: int, chat_id: int, role: str):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -85,39 +83,47 @@ def remove_role(user_id: int, chat_id: int):
     conn.commit()
     conn.close()
 
-# Глобальные баны (внутри связанных бесед)
-def add_global_ban(user_id: int, reason: str, banned_by: int):
+def get_all_roles(chat_id: int) -> List[Tuple[int, str]]:
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute('INSERT OR REPLACE INTO global_bans (user_id, reason, banned_by) VALUES (?, ?, ?)', 
-              (user_id, reason, banned_by))
-    conn.commit()
-    conn.close()
-
-def remove_global_ban(user_id: int):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('DELETE FROM global_bans WHERE user_id = ?', (user_id,))
-    conn.commit()
-    conn.close()
-
-def is_globally_banned(user_id: int) -> bool:
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('SELECT 1 FROM global_bans WHERE user_id = ?', (user_id,))
-    row = c.fetchone()
-    conn.close()
-    return row is not None
-
-def get_global_bans() -> List[Tuple]:
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('SELECT user_id, reason, banned_by, banned_at FROM global_bans')
+    c.execute('SELECT user_id, role FROM user_roles WHERE chat_id = ?', (chat_id,))
     rows = c.fetchall()
     conn.close()
     return rows
 
-# Ники
+# === ГЛОБАЛЬНЫЕ БАНЫ ===
+def add_global_ban(user_id: int, group_id: int, reason: str, banned_by: int):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('INSERT OR REPLACE INTO global_bans (user_id, group_id, reason, banned_by) VALUES (?, ?, ?, ?)', 
+              (user_id, group_id, reason, banned_by))
+    conn.commit()
+    conn.close()
+
+def remove_global_ban(user_id: int, group_id: int):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('DELETE FROM global_bans WHERE user_id = ? AND group_id = ?', (user_id, group_id))
+    conn.commit()
+    conn.close()
+
+def is_globally_banned(user_id: int, group_id: int) -> bool:
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('SELECT 1 FROM global_bans WHERE user_id = ? AND group_id = ?', (user_id, group_id))
+    row = c.fetchone()
+    conn.close()
+    return row is not None
+
+def get_global_bans(group_id: int) -> List[Tuple]:
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('SELECT user_id, reason, banned_by, banned_at FROM global_bans WHERE group_id = ?', (group_id,))
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+# === НИКИ ===
 def set_nickname(user_id: int, chat_id: int, nickname: str):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -149,7 +155,7 @@ def get_all_nicknames(chat_id: int) -> List[Tuple[int, str]]:
     conn.close()
     return rows
 
-# Приветствия
+# === ПРИВЕТСТВИЯ ===
 def set_welcome(chat_id: int, text: str):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -173,7 +179,7 @@ def reset_welcome(chat_id: int):
     conn.commit()
     conn.close()
 
-# Фильтр слов
+# === ФИЛЬТР СЛОВ ===
 def add_banned_word(chat_id: int, word: str):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -195,55 +201,3 @@ def get_banned_words(chat_id: int) -> List[str]:
     rows = c.fetchall()
     conn.close()
     return [row[0] for row in rows]
-
-# Связывание бесед (вместо кластеров)
-def create_chat_group(group_id: int):
-    """Создаёт новую группу бесед (очищает)"""
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('DELETE FROM linked_chats WHERE group_id = ?', (group_id,))
-    conn.commit()
-    conn.close()
-
-def add_chat_to_group(group_id: int, chat_id: int):
-    """Добавляет беседу в группу"""
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('INSERT OR IGNORE INTO linked_chats (group_id, chat_id) VALUES (?, ?)', (group_id, chat_id))
-    conn.commit()
-    conn.close()
-
-def remove_chat_from_group(group_id: int, chat_id: int):
-    """Удаляет беседу из группы"""
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('DELETE FROM linked_chats WHERE group_id = ? AND chat_id = ?', (group_id, chat_id))
-    conn.commit()
-    conn.close()
-
-def get_group_chats(group_id: int) -> List[int]:
-    """Получает все беседы в группе"""
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('SELECT chat_id FROM linked_chats WHERE group_id = ?', (group_id,))
-    rows = c.fetchall()
-    conn.close()
-    return [row[0] for row in rows]
-
-def list_groups() -> List[int]:
-    """Список всех групп"""
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('SELECT DISTINCT group_id FROM linked_chats')
-    rows = c.fetchall()
-    conn.close()
-    return [row[0] for row in rows]
-
-def get_chat_group(chat_id: int) -> Optional[int]:
-    """Возвращает ID группы для беседы"""
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('SELECT group_id FROM linked_chats WHERE chat_id = ?', (chat_id,))
-    row = c.fetchone()
-    conn.close()
-    return row[0] if row else None
