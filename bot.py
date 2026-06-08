@@ -1,21 +1,337 @@
 import asyncio
+import sqlite3
 import re
 from datetime import datetime, timedelta
+from typing import List, Optional, Tuple
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, ChatMemberUpdated
 from aiogram.filters import Command, CommandObject
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 
-from config import BOT_TOKEN, OWNER_IDS, ALLOWED_CHATS, BOT_NAME, get_group_by_chat, get_chats_by_group
-from database import (
-    init_db, set_role, get_role, remove_role, set_nickname, get_nickname, remove_nickname,
-    get_all_nicknames, set_welcome, get_welcome, reset_welcome, add_banned_word,
-    remove_banned_word, get_banned_words, get_global_bans
-)
-from admin_roles import get_user_role_level, is_admin, is_senior_moderator, is_moderator, check_global_ban
-from group_manager import kick_from_group, global_ban_in_group, global_unban_in_group, send_news_to_group
+# ==================== КОНФИГУРАЦИЯ ====================
+BOT_TOKEN = "8975105830:AAHSsz6kETM1gD-x2JnOlfVTeLOWMRp_8I4"  # ЗАМЕНИТЕ НА СВОЙ ТОКЕН!
 
+# ID владельцев (кто имеет права администратора по умолчанию)
+OWNER_IDS = [8881305868]  # ЗАМЕНИТЕ НА СВОЙ ID!
+
+# ФИКСИРОВАННЫЕ БЕСЕДЫ (группы чатов)
+# Формат: ID_ГРУППЫ: [список ID чатов]
+FIXED_CHAT_GROUPS = {
+    1: [-1003641912264, -1003739741915],  # Группа 1: два чата
+    # 2: [-1003333333333],  # Раскомментируйте для добавления второй группы
+}
+
+# Все разрешённые чаты (автоматически собираются из FIXED_CHAT_GROUPS)
+ALLOWED_CHATS = []
+for chats in FIXED_CHAT_GROUPS.values():
+    ALLOWED_CHATS.extend(chats)
+
+BOT_NAME = "Cromulent RP | Chat Manager"
+
+def get_group_by_chat(chat_id: int):
+    """Возвращает ID группы для чата"""
+    for group_id, chats in FIXED_CHAT_GROUPS.items():
+        if chat_id in chats:
+            return group_id
+    return None
+
+def get_chats_by_group(group_id: int):
+    """Возвращает список чатов в группе"""
+    return FIXED_CHAT_GROUPS.get(group_id, [])
+
+# ==================== БАЗА ДАННЫХ ====================
+DB_PATH = "chat_manager.db"
+
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS user_roles (
+            user_id INTEGER,
+            chat_id INTEGER,
+            role TEXT CHECK(role IN ('moderator', 'senior_moderator', 'administrator')),
+            PRIMARY KEY (user_id, chat_id)
+        )
+    ''')
+    
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS global_bans (
+            user_id INTEGER,
+            group_id INTEGER,
+            reason TEXT,
+            banned_by INTEGER,
+            banned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (user_id, group_id)
+        )
+    ''')
+    
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS nicknames (
+            user_id INTEGER,
+            chat_id INTEGER,
+            nickname TEXT,
+            PRIMARY KEY (user_id, chat_id)
+        )
+    ''')
+    
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS welcome_settings (
+            chat_id INTEGER PRIMARY KEY,
+            welcome_text TEXT
+        )
+    ''')
+    
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS banned_words (
+            chat_id INTEGER,
+            word TEXT,
+            PRIMARY KEY (chat_id, word)
+        )
+    ''')
+    
+    conn.commit()
+    conn.close()
+
+# === РОЛИ ===
+def set_role(user_id: int, chat_id: int, role: str):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('INSERT OR REPLACE INTO user_roles (user_id, chat_id, role) VALUES (?, ?, ?)', 
+              (user_id, chat_id, role))
+    conn.commit()
+    conn.close()
+
+def get_role(user_id: int, chat_id: int) -> Optional[str]:
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('SELECT role FROM user_roles WHERE user_id = ? AND chat_id = ?', (user_id, chat_id))
+    row = c.fetchone()
+    conn.close()
+    return row[0] if row else None
+
+def remove_role(user_id: int, chat_id: int):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('DELETE FROM user_roles WHERE user_id = ? AND chat_id = ?', (user_id, chat_id))
+    conn.commit()
+    conn.close()
+
+def get_all_roles(chat_id: int) -> List[Tuple[int, str]]:
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('SELECT user_id, role FROM user_roles WHERE chat_id = ?', (chat_id,))
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+# === ГЛОБАЛЬНЫЕ БАНЫ ===
+def add_global_ban(user_id: int, group_id: int, reason: str, banned_by: int):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('INSERT OR REPLACE INTO global_bans (user_id, group_id, reason, banned_by) VALUES (?, ?, ?, ?)', 
+              (user_id, group_id, reason, banned_by))
+    conn.commit()
+    conn.close()
+
+def remove_global_ban(user_id: int, group_id: int):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('DELETE FROM global_bans WHERE user_id = ? AND group_id = ?', (user_id, group_id))
+    conn.commit()
+    conn.close()
+
+def is_globally_banned(user_id: int, group_id: int) -> bool:
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('SELECT 1 FROM global_bans WHERE user_id = ? AND group_id = ?', (user_id, group_id))
+    row = c.fetchone()
+    conn.close()
+    return row is not None
+
+def get_global_bans(group_id: int) -> List[Tuple]:
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('SELECT user_id, reason, banned_by, banned_at FROM global_bans WHERE group_id = ?', (group_id,))
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+# === НИКИ ===
+def set_nickname(user_id: int, chat_id: int, nickname: str):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('INSERT OR REPLACE INTO nicknames (user_id, chat_id, nickname) VALUES (?, ?, ?)', 
+              (user_id, chat_id, nickname))
+    conn.commit()
+    conn.close()
+
+def get_nickname(user_id: int, chat_id: int) -> Optional[str]:
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('SELECT nickname FROM nicknames WHERE user_id = ? AND chat_id = ?', (user_id, chat_id))
+    row = c.fetchone()
+    conn.close()
+    return row[0] if row else None
+
+def remove_nickname(user_id: int, chat_id: int):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('DELETE FROM nicknames WHERE user_id = ? AND chat_id = ?', (user_id, chat_id))
+    conn.commit()
+    conn.close()
+
+def get_all_nicknames(chat_id: int) -> List[Tuple[int, str]]:
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('SELECT user_id, nickname FROM nicknames WHERE chat_id = ?', (chat_id,))
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+# === ПРИВЕТСТВИЯ ===
+def set_welcome(chat_id: int, text: str):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('INSERT OR REPLACE INTO welcome_settings (chat_id, welcome_text) VALUES (?, ?)', 
+              (chat_id, text))
+    conn.commit()
+    conn.close()
+
+def get_welcome(chat_id: int) -> Optional[str]:
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('SELECT welcome_text FROM welcome_settings WHERE chat_id = ?', (chat_id,))
+    row = c.fetchone()
+    conn.close()
+    return row[0] if row else None
+
+def reset_welcome(chat_id: int):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('DELETE FROM welcome_settings WHERE chat_id = ?', (chat_id,))
+    conn.commit()
+    conn.close()
+
+# === ФИЛЬТР СЛОВ ===
+def add_banned_word(chat_id: int, word: str):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('INSERT OR IGNORE INTO banned_words (chat_id, word) VALUES (?, ?)', (chat_id, word.lower()))
+    conn.commit()
+    conn.close()
+
+def remove_banned_word(chat_id: int, word: str):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('DELETE FROM banned_words WHERE chat_id = ? AND word = ?', (chat_id, word.lower()))
+    conn.commit()
+    conn.close()
+
+def get_banned_words(chat_id: int) -> List[str]:
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('SELECT word FROM banned_words WHERE chat_id = ?', (chat_id,))
+    rows = c.fetchall()
+    conn.close()
+    return [row[0] for row in rows]
+
+# ==================== УПРАВЛЕНИЕ ГРУППАМИ ====================
+async def kick_from_group(bot, user_id: int, chat_id: int):
+    """Кик пользователя из всех бесед его группы"""
+    group_id = get_group_by_chat(chat_id)
+    if not group_id:
+        return False
+    
+    chats = get_chats_by_group(group_id)
+    success = False
+    for cid in chats:
+        try:
+            await bot.ban_chat_member(cid, user_id)
+            await bot.unban_chat_member(cid, user_id)
+            success = True
+        except Exception:
+            pass
+    return success
+
+async def global_ban_in_group(bot, user_id: int, chat_id: int, reason: str, banned_by: int):
+    """Глобальный бан пользователя во всей группе бесед"""
+    group_id = get_group_by_chat(chat_id)
+    if not group_id:
+        return False
+    
+    add_global_ban(user_id, group_id, reason, banned_by)
+    
+    chats = get_chats_by_group(group_id)
+    for cid in chats:
+        try:
+            await bot.ban_chat_member(cid, user_id)
+        except Exception:
+            pass
+    return True
+
+async def global_unban_in_group(bot, user_id: int, chat_id: int):
+    """Снятие глобального бана"""
+    group_id = get_group_by_chat(chat_id)
+    if not group_id:
+        return False
+    
+    remove_global_ban(user_id, group_id)
+    
+    chats = get_chats_by_group(group_id)
+    for cid in chats:
+        try:
+            await bot.unban_chat_member(cid, user_id)
+        except Exception:
+            pass
+    return True
+
+async def send_news_to_group(bot, chat_id: int, news_text: str):
+    """Отправка рассылки во все беседы группы"""
+    group_id = get_group_by_chat(chat_id)
+    if not group_id:
+        return 0
+    
+    chats = get_chats_by_group(group_id)
+    success_count = 0
+    for cid in chats:
+        try:
+            await bot.send_message(cid, f"📢 <b>Рассылка:</b>\n{news_text}")
+            success_count += 1
+        except Exception:
+            pass
+    return success_count
+
+# ==================== АДМИН РОЛИ ====================
+ROLE_HIERARCHY = {
+    "moderator": 1,
+    "senior_moderator": 2,
+    "administrator": 3
+}
+
+def get_user_role_level(user_id: int, chat_id: int) -> int:
+    if user_id in OWNER_IDS:
+        return 3
+    role = get_role(user_id, chat_id)
+    return ROLE_HIERARCHY.get(role, 0)
+
+def is_admin(user_id: int, chat_id: int) -> bool:
+    return get_user_role_level(user_id, chat_id) >= 3
+
+def is_senior_moderator(user_id: int, chat_id: int) -> bool:
+    return get_user_role_level(user_id, chat_id) >= 2
+
+def is_moderator(user_id: int, chat_id: int) -> bool:
+    return get_user_role_level(user_id, chat_id) >= 1
+
+def check_global_ban(user_id: int, chat_id: int) -> bool:
+    group_id = get_group_by_chat(chat_id)
+    if group_id:
+        return is_globally_banned(user_id, group_id)
+    return False
+
+# ==================== БОТ ====================
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
@@ -35,14 +351,6 @@ async def chat_not_allowed(message: Message):
         pass
 
 # === ХЕЛПЕРЫ ===
-def get_display_name(user_id: int, chat_id: int, username: str = None, first_name: str = None) -> str:
-    nickname = get_nickname(user_id, chat_id)
-    if nickname:
-        return nickname
-    if username:
-        return f"@{username}"
-    return first_name or str(user_id)
-
 async def check_permission(message: Message, required_level: int) -> bool:
     user_level = get_user_role_level(message.from_user.id, message.chat.id)
     if user_level >= required_level:
@@ -61,7 +369,6 @@ async def check_global_ban_for_user(message: Message) -> bool:
     return False
 
 async def get_user_from_mention(chat_id: int, username: str):
-    """Получить пользователя по @username"""
     if username.startswith('@'):
         username = username[1:]
     try:
@@ -97,6 +404,10 @@ async def filter_bad_words(message: Message):
                 break
 
 # === ПОЛЬЗОВАТЕЛЬСКИЕ КОМАНДЫ ===
+@dp.message(Command("start"))
+async def cmd_start(message: Message):
+    await message.reply(f"🤖 {BOT_NAME} приветствует вас!\nИспользуйте /help для списка команд.")
+
 @dp.message(Command("id"))
 async def cmd_id(message: Message, command: CommandObject):
     if command.args:
@@ -117,7 +428,6 @@ async def cmd_staff(message: Message):
     senior_mods = []
     mods = []
     
-    # Проверяем владельцев из конфига
     for owner_id in OWNER_IDS:
         try:
             member = await bot.get_chat_member(message.chat.id, owner_id)
@@ -125,8 +435,6 @@ async def cmd_staff(message: Message):
         except:
             pass
     
-    # Проверяем роли из БД
-    from database import get_all_roles
     roles = get_all_roles(message.chat.id)
     for user_id, role in roles:
         if user_id in OWNER_IDS:
@@ -533,7 +841,7 @@ async def cmd_setwelcome(message: Message, command: CommandObject):
     if not await check_permission(message, 2):
         return
     if not command.args:
-        await message.reply("❌ Использование: /setwelcome текст\nПеременные: {mention}, {name}")
+        await message.reply("❌ Использование: /setwelcome текст\nПеременные: {{mention}}, {{name}}")
         return
     set_welcome(message.chat.id, command.args)
     await message.reply("✅ Приветствие установлено.")
@@ -604,6 +912,17 @@ async def main():
     print(f"🤖 {BOT_NAME} запущен!")
     print(f"✅ Разрешённые беседы: {ALLOWED_CHATS}")
     print(f"📊 Группы бесед: {list(FIXED_CHAT_GROUPS.keys())}")
+    
+    # Проверка подключения к Telegram
+    try:
+        me = await bot.get_me()
+        print(f"✅ Бот подключен: @{me.username} (ID: {me.id})")
+    except Exception as e:
+        print(f"❌ Ошибка подключения: {e}")
+        print("❌ Проверьте токен бота в config.py!")
+        return
+    
+    print("🔄 Запускаем polling...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
