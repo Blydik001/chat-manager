@@ -18,8 +18,7 @@ OWNER_IDS = [8881305868]  # ЗАМЕНИТЕ НА СВОЙ ID!
 # ФИКСИРОВАННЫЕ БЕСЕДЫ (группы чатов)
 # Формат: ID_ГРУППЫ: [список ID чатов]
 FIXED_CHAT_GROUPS = {
-    1: [-1003641912264, -1003739741915],  # Группа 1: два чата
-    # 2: [-1003333333333],  # Раскомментируйте для добавления второй группы
+    1: [-1003739741915, -1003641912264],  # Группа 1: два чата
 }
 
 # Все разрешённые чаты (автоматически собираются из FIXED_CHAT_GROUPS)
@@ -27,7 +26,7 @@ ALLOWED_CHATS = []
 for chats in FIXED_CHAT_GROUPS.values():
     ALLOWED_CHATS.extend(chats)
 
-BOT_NAME = "Cromulent RP | Chat Manager"
+BOT_NAME = "BR | Chat Manager"
 
 def get_group_by_chat(chat_id: int):
     """Возвращает ID группы для чата"""
@@ -342,13 +341,21 @@ temp_mutes = {}
 init_db()
 
 # === ФИЛЬТР РАЗРЕШЁННЫХ ЧАТОВ ===
+# Разрешаем ЛИЧНЫЕ СООБЩЕНИЯ (chat.type == "private") и указанные группы
+@dp.message(F.chat.type == "private")
+async def private_chat_handler(message: Message):
+    # В ЛС бот работает для всех
+    pass  # Пропускаем дальше к обработчикам команд
+
 @dp.message(F.chat.id.not_in(ALLOWED_CHATS))
 async def chat_not_allowed(message: Message):
-    await message.reply("❌ Этот чат не входит в список разрешённых бесед бота.")
-    try:
-        await message.leave()
-    except:
-        pass
+    # Этот обработчик сработает только для групп, которых нет в списке
+    if message.chat.type != "private":
+        await message.reply("❌ Этот чат не входит в список разрешённых бесед бота.")
+        try:
+            await message.leave()
+        except:
+            pass
 
 # === ХЕЛПЕРЫ ===
 async def check_permission(message: Message, required_level: int) -> bool:
@@ -388,8 +395,8 @@ async def on_user_join(update: ChatMemberUpdated):
             text = welcome_text.replace("{mention}", user_mention).replace("{name}", user.full_name)
             await bot.send_message(update.chat.id, text, parse_mode=ParseMode.HTML)
 
-# === ФИЛЬТР ПЛОХИХ СЛОВ ===
-@dp.message(F.text)
+# === ФИЛЬТР ПЛОХИХ СЛОВ (только в группах) ===
+@dp.message(F.text, F.chat.type.in_({"group", "supergroup"}))
 async def filter_bad_words(message: Message):
     if await check_global_ban_for_user(message):
         return
@@ -423,6 +430,11 @@ async def cmd_id(message: Message, command: CommandObject):
 
 @dp.message(Command("staff"))
 async def cmd_staff(message: Message):
+    # В ЛС эта команда не работает
+    if message.chat.type == "private":
+        await message.reply("ℹ️ Команда /staff работает только в группах.")
+        return
+    
     text = "👥 <b>Сотрудники чата:</b>\n\n"
     admins = []
     senior_mods = []
@@ -503,6 +515,9 @@ async def cmd_help(message: Message):
 # === МОДЕРАТОР ===
 @dp.message(Command("clear"))
 async def cmd_clear(message: Message):
+    if message.chat.type == "private":
+        await message.reply("ℹ️ Команда /clear работает только в группах.")
+        return
     if not await check_permission(message, 1):
         return
     if message.reply_to_message:
@@ -513,6 +528,9 @@ async def cmd_clear(message: Message):
 
 @dp.message(Command("gbynick"))
 async def cmd_gbynick(message: Message, command: CommandObject):
+    if message.chat.type == "private":
+        await message.reply("ℹ️ Команда /gbynick работает только в группах.")
+        return
     if not await check_permission(message, 1):
         return
     if not command.args:
@@ -531,6 +549,9 @@ async def cmd_gbynick(message: Message, command: CommandObject):
 
 @dp.message(Command("gnick"))
 async def cmd_gnick(message: Message, command: CommandObject):
+    if message.chat.type == "private":
+        await message.reply("ℹ️ Команда /gnick работает только в группах.")
+        return
     if not await check_permission(message, 1):
         return
     target = None
@@ -550,6 +571,9 @@ async def cmd_gnick(message: Message, command: CommandObject):
 
 @dp.message(Command("kick"))
 async def cmd_kick(message: Message, command: CommandObject):
+    if message.chat.type == "private":
+        await message.reply("ℹ️ Команда /kick работает только в группах.")
+        return
     if not await check_permission(message, 1):
         return
     target = None
@@ -577,6 +601,9 @@ async def cmd_kick(message: Message, command: CommandObject):
 
 @dp.message(Command("mute"))
 async def cmd_mute(message: Message, command: CommandObject):
+    if message.chat.type == "private":
+        await message.reply("ℹ️ Команда /mute работает только в группах.")
+        return
     if not await check_permission(message, 1):
         return
     args = command.args.split() if command.args else []
@@ -608,6 +635,9 @@ async def cmd_mute(message: Message, command: CommandObject):
 
 @dp.message(Command("unmute"))
 async def cmd_unmute(message: Message, command: CommandObject):
+    if message.chat.type == "private":
+        await message.reply("ℹ️ Команда /unmute работает только в группах.")
+        return
     if not await check_permission(message, 1):
         return
     target = None
@@ -628,6 +658,9 @@ async def cmd_unmute(message: Message, command: CommandObject):
 
 @dp.message(Command("snick"))
 async def cmd_snick(message: Message, command: CommandObject):
+    if message.chat.type == "private":
+        await message.reply("ℹ️ Команда /snick работает только в группах.")
+        return
     if not await check_permission(message, 1):
         return
     args = command.args.split(maxsplit=1) if command.args else []
@@ -645,6 +678,9 @@ async def cmd_snick(message: Message, command: CommandObject):
 
 @dp.message(Command("rnick"))
 async def cmd_rnick(message: Message, command: CommandObject):
+    if message.chat.type == "private":
+        await message.reply("ℹ️ Команда /rnick работает только в группах.")
+        return
     if not await check_permission(message, 1):
         return
     target = None
@@ -661,6 +697,9 @@ async def cmd_rnick(message: Message, command: CommandObject):
 
 @dp.message(Command("ban"))
 async def cmd_ban(message: Message, command: CommandObject):
+    if message.chat.type == "private":
+        await message.reply("ℹ️ Команда /ban работает только в группах.")
+        return
     if not await check_permission(message, 1):
         return
     target = None
@@ -684,6 +723,9 @@ async def cmd_ban(message: Message, command: CommandObject):
 
 @dp.message(Command("unban"))
 async def cmd_unban(message: Message, command: CommandObject):
+    if message.chat.type == "private":
+        await message.reply("ℹ️ Команда /unban работает только в группах.")
+        return
     if not await check_permission(message, 1):
         return
     if not command.args:
@@ -706,6 +748,9 @@ async def cmd_unban(message: Message, command: CommandObject):
 
 @dp.message(Command("nlist"))
 async def cmd_nlist(message: Message):
+    if message.chat.type == "private":
+        await message.reply("ℹ️ Команда /nlist работает только в группах.")
+        return
     if not await check_permission(message, 1):
         return
     nicks = get_all_nicknames(message.chat.id)
@@ -717,6 +762,9 @@ async def cmd_nlist(message: Message):
 
 @dp.message(Command("pin"))
 async def cmd_pin(message: Message):
+    if message.chat.type == "private":
+        await message.reply("ℹ️ Команда /pin работает только в группах.")
+        return
     if not await check_permission(message, 1):
         return
     if message.reply_to_message:
@@ -727,6 +775,9 @@ async def cmd_pin(message: Message):
 
 @dp.message(Command("unpin"))
 async def cmd_unpin(message: Message):
+    if message.chat.type == "private":
+        await message.reply("ℹ️ Команда /unpin работает только в группах.")
+        return
     if not await check_permission(message, 1):
         return
     if message.reply_to_message:
@@ -737,6 +788,9 @@ async def cmd_unpin(message: Message):
 
 @dp.message(Command("gkick"))
 async def cmd_gkick(message: Message, command: CommandObject):
+    if message.chat.type == "private":
+        await message.reply("ℹ️ Команда /gkick работает только в группах.")
+        return
     if not await check_permission(message, 1):
         return
     target = None
@@ -757,6 +811,9 @@ async def cmd_gkick(message: Message, command: CommandObject):
 # === СТАРШИЙ МОДЕРАТОР ===
 @dp.message(Command("gban"))
 async def cmd_gban(message: Message, command: CommandObject):
+    if message.chat.type == "private":
+        await message.reply("ℹ️ Команда /gban работает только в группах.")
+        return
     if not await check_permission(message, 2):
         return
     args = command.args.split(maxsplit=1) if command.args else []
@@ -777,6 +834,9 @@ async def cmd_gban(message: Message, command: CommandObject):
 
 @dp.message(Command("gunban"))
 async def cmd_gunban(message: Message, command: CommandObject):
+    if message.chat.type == "private":
+        await message.reply("ℹ️ Команда /gunban работает только в группах.")
+        return
     if not await check_permission(message, 2):
         return
     if not command.args:
@@ -802,6 +862,9 @@ async def cmd_gunban(message: Message, command: CommandObject):
 
 @dp.message(Command("setrole"))
 async def cmd_setrole(message: Message, command: CommandObject):
+    if message.chat.type == "private":
+        await message.reply("ℹ️ Команда /setrole работает только в группах.")
+        return
     if not await check_permission(message, 2):
         return
     args = command.args.split() if command.args else []
@@ -822,6 +885,9 @@ async def cmd_setrole(message: Message, command: CommandObject):
 
 @dp.message(Command("removerole"))
 async def cmd_removerole(message: Message, command: CommandObject):
+    if message.chat.type == "private":
+        await message.reply("ℹ️ Команда /removerole работает только в группах.")
+        return
     if not await check_permission(message, 2):
         return
     target = None
@@ -838,6 +904,9 @@ async def cmd_removerole(message: Message, command: CommandObject):
 
 @dp.message(Command("setwelcome"))
 async def cmd_setwelcome(message: Message, command: CommandObject):
+    if message.chat.type == "private":
+        await message.reply("ℹ️ Команда /setwelcome работает только в группах.")
+        return
     if not await check_permission(message, 2):
         return
     if not command.args:
@@ -848,6 +917,9 @@ async def cmd_setwelcome(message: Message, command: CommandObject):
 
 @dp.message(Command("getwelcome"))
 async def cmd_getwelcome(message: Message):
+    if message.chat.type == "private":
+        await message.reply("ℹ️ Команда /getwelcome работает только в группах.")
+        return
     if not await check_permission(message, 2):
         return
     text = get_welcome(message.chat.id)
@@ -858,6 +930,9 @@ async def cmd_getwelcome(message: Message):
 
 @dp.message(Command("resetwelcome"))
 async def cmd_resetwelcome(message: Message):
+    if message.chat.type == "private":
+        await message.reply("ℹ️ Команда /resetwelcome работает только в группах.")
+        return
     if not await check_permission(message, 2):
         return
     reset_welcome(message.chat.id)
@@ -866,6 +941,9 @@ async def cmd_resetwelcome(message: Message):
 # === АДМИНИСТРАТОР ===
 @dp.message(Command("words"))
 async def cmd_words(message: Message, command: CommandObject):
+    if message.chat.type == "private":
+        await message.reply("ℹ️ Команда /words работает только в группах.")
+        return
     if not await check_permission(message, 3):
         return
     args = command.args.split() if command.args else []
@@ -895,6 +973,9 @@ async def cmd_words(message: Message, command: CommandObject):
 
 @dp.message(Command("news"))
 async def cmd_news(message: Message, command: CommandObject):
+    if message.chat.type == "private":
+        await message.reply("ℹ️ Команда /news работает только в группах.")
+        return
     if not await check_permission(message, 3):
         return
     if not command.args:
