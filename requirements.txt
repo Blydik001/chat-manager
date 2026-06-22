@@ -1,2 +1,2 @@
-aiogram
-pytz
+vk_api
+psycopg2-binary
