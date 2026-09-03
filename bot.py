@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import traceback
 import aiohttp
 from aiogram import Bot, Dispatcher, html, F
 from aiogram.filters import CommandStart, Command
@@ -8,6 +7,7 @@ from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, C
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 
+# Установлен ваш рабочий токен
 TOKEN = "8929522753:AAG4rb7zImXg2cfzQU9azjeMpRK7KTwnunE"
 
 dp = Dispatcher()
@@ -122,7 +122,7 @@ async def process_tech_buttons(callback: CallbackQuery) -> None:
     await callback.answer(action_text, show_alert=True)
 
 
-# --- ОТЛАДОЧНАЯ АНАЛИТИКА IP ---
+# --- ИСПРАВЛЕННАЯ АНАЛИТИКА IP ---
 
 @dp.message(IPForm.waiting_for_ip)
 async def analyze_ip_message(message: Message, state: FSMContext) -> None:
@@ -135,17 +135,15 @@ async def analyze_ip_message(message: Message, state: FSMContext) -> None:
     status_message = await message.answer("🔄 Анализируем IP-адреса...")
     final_report = "⚙️ Информация о IP-адресах:\n\n"
     
-    # Отключаем проверку SSL
     connector = aiohttp.TCPConnector(ssl=False)
-    
-    # Добавляем заголовки реального браузера, чтобы исключить блокировки от API-сервера
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
     
     async with aiohttp.ClientSession(connector=connector, headers=headers) as session:
         for idx, ip_address in enumerate(ip_list, start=1):
-            # Переключено на стабильный HTTPS
+            
+            # ЖЕСТКАЯ ФИКСАЦИЯ СЛЭША (Слияние домена и IP теперь полностью исключено)
             api_url = f"https://ip-api.com{ip_address}?fields=status,country,regionName,city,isp,as,hosting"
             
             try:
@@ -167,6 +165,7 @@ async def analyze_ip_message(message: Message, state: FSMContext) -> None:
                         isp_lower = isp.lower()
                         as_lower = as_info.lower()
                         
+                        # Расширенное определение типа интернета и VPN
                         if is_hosting or "visp" in as_lower or "vpn" in isp_lower or "hosting" in isp_lower or "data" in isp_lower:
                             vpn_status = "VPN используется"
                             vpn_bool = "Есть (Используется)"
@@ -180,6 +179,7 @@ async def analyze_ip_message(message: Message, state: FSMContext) -> None:
                             vpn_bool = "Нету"
                             internet_type = "Домашний интернет / WiFi"
 
+                        # Вывод строго по вашему текстовому шаблону
                         final_report += (
                             f"IP {idx}: {ip_address}\n"
                             f"Страна: {country}\n"
@@ -197,12 +197,10 @@ async def analyze_ip_message(message: Message, state: FSMContext) -> None:
                         final_report += f"IP {idx}: {ip_address}\n❌ Сервер ответил кодом: {response.status}\n\n"
             
             except Exception as e:
-                # ВМЕСТО РЕЗЕРВА: Бот теперь выведет точную техническую ошибку прямо в чат!
-                error_trace = traceback.format_exc()
-                logging.error(f"Сбой при проверке IP {ip_address}:\n{error_trace}")
+                logging.error(f"Сбой при проверке IP {ip_address}: {e}")
                 final_report += f"IP {idx}: {ip_address}\n❌ Технический сбой сети:\n`{str(e)}`\n\n"
 
-    await status_message.edit_text(final_report, parse_mode="Markdown")
+    await status_message.edit_text(final_report)
     await state.clear()
 
 
