@@ -11,7 +11,6 @@ TOKEN = "8929522753:AAG4rb7zImXg2cfzQU9azjeMpRK7KTwnunE"
 
 dp = Dispatcher()
 
-# Состояние ожидания ввода IP
 class IPForm(StatesGroup):
     waiting_for_ip = State()
 
@@ -36,7 +35,7 @@ def get_tech_panel() -> InlineKeyboardMarkup:
 
 def get_cancel_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Вернуться на главную", callback_data="cancel_ip_input")]
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_ip_input")]
     ])
 
 
@@ -89,7 +88,6 @@ async def process_settings(callback: CallbackQuery) -> None:
     await callback.answer("⚙️ Раздел 'Настройки' находится в разработке.", show_alert=True)
 
 
-# НАЖАТИЕ НА КНОПКУ АНАЛИТИКА IP
 @dp.callback_query(F.data == "tech_ip_analytics")
 async def process_ip_analytics(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
@@ -123,7 +121,7 @@ async def process_tech_buttons(callback: CallbackQuery) -> None:
     await callback.answer(action_text, show_alert=True)
 
 
-# --- ОБРАБОТКА ВВЕДЕННЫХ IP-АДРЕСОВ ---
+# --- ОБРАБОТКА ВВЕДЕННЫХ IP-АДРЕСОВ ЧЕРЕЗ API 2IP ---
 
 @dp.message(IPForm.waiting_for_ip)
 async def analyze_ip_message(message: Message, state: FSMContext) -> None:
@@ -133,34 +131,44 @@ async def analyze_ip_message(message: Message, state: FSMContext) -> None:
         await message.answer("❌ Вы не ввели ни одного IP-адреса. Попробуйте еще раз.")
         return
 
-    status_message = await message.answer("🔄 Запрос к базе данных, проверка IP...")
-    
+    status_message = await message.answer("🔄 Запрос к базе данных 2ip.io, проверка IP...")
     final_report = " Информация о IP-адресах:\n\n"
     
     async with aiohttp.ClientSession() as session:
         for idx, ip_address in enumerate(ip_list, start=1):
-            # ТУТ ИСПРАВЛЕНО: добавлен слэш перед {ip_address}
-            api_url = f"http://ip-api.com{ip_address}?fields=status,country,regionName,city,isp,as,hosting"
+            
+            # Используем открытый эндпоинт API от 2ip для получения полной информации
+            api_url = f"https://2ip.ua{ip_address}"
             
             try:
                 async with session.get(api_url) as response:
                     if response.status == 200:
                         data = await response.json()
                         
-                        if data.get("status") == "fail":
-                            final_report += f"**IP {idx}**: `{ip_address}`\n❌ Ошибка: Неверный формат IP-адреса\n\n"
+                        # Если API ничего не вернуло или вернуло ошибку
+                        if not data or data.get("country") is None:
+                            final_report += f"**IP {idx}**: `{ip_address}`\n❌ Ошибка: Неверный формат или нет данных в базе 2ip\n\n"
                             continue
                         
+                        # Парсим данные ответа от 2ip
                         country = data.get("country", "Не определено")
-                        region = data.get("regionName", "Не определено")
+                        region = data.get("region", "Не определено")
                         city = data.get("city", "Не определено")
                         isp = data.get("isp", "Не определено")
-                        as_info = data.get("as", "Не определено")
                         
-                        is_hosting = data.get("hosting", False)
+                        # Дополнительная техническая информация (ASN, маска)
+                        asn = data.get("asn", "Не определено")
+                        cidr = data.get("cidr", "Не определено")
+                        as_info = f"ASN: {asn} | Подсеть: {cidr}"
+                        
+                        # Проверка на использование VPN/Прокси/Хостинга
+                        # В структуре 2ip флаг "hosting" или "proxy" указывает на то то, что это сервер/прокси
+                        is_hosting = data.get("hosting", False) or data.get("proxy", False)
+                        
                         vpn_status = "VPN используется" if is_hosting else "VPN не обнаружен / Чистый residential"
-                        internet_type = "Дата-центр / Хостинг" if is_hosting else "Мобильный / Домашний интернет"
+                        internet_type = "Дата-центр / Хостинг / Прокси" if is_hosting else "Мобильный / Домашний интернет"
                         
+                        # Формируем отчет строго по вашему шаблону
                         final_report += (
                             f"**IP {idx}**: `{ip_address}`\n"
                             f"**Страна**: {country}\n"
@@ -175,9 +183,9 @@ async def analyze_ip_message(message: Message, state: FSMContext) -> None:
                             f"⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n\n"
                         )
                     else:
-                        final_report += f"**IP {idx}**: `{ip_address}`\n❌ Ошибка сервера аналитики\n\n"
+                        final_report += f"**IP {idx}**: `{ip_address}`\n❌ Ошибка сервера 2ip.io\n\n"
             except Exception as e:
-                logging.error(f"Error checking IP {ip_address}: {e}")
+                logging.error(f"Error checking IP {ip_address} via 2ip: {e}")
                 final_report += f"**IP {idx}**: `{ip_address}`\n❌ Внутренняя ошибка сети\n\n"
 
     await status_message.edit_text(final_report, parse_mode="Markdown")
