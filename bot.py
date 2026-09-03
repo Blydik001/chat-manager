@@ -38,31 +38,31 @@ def calculate_haversine(lat1, lon1, lat2, lon2):
 
 def get_main_panel() -> InlineKeyboardMarkup:
     buttons = [
-        [InlineKeyboardButton(text="🛠 Технический раздел", callback_data="tech_section")],
-        [InlineKeyboardButton(text="⚙️ Настройки", callback_data="settings_section")]
+        [InlineKeyboardButton(text="Технический раздел", callback_data="tech_section")],
+        [InlineKeyboardButton(text="Настройки", callback_data="settings_section")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_tech_panel() -> InlineKeyboardMarkup:
     buttons = [
-        [InlineKeyboardButton(text="📊 Аналитика IP", callback_data="tech_ip_analytics")],
-        [InlineKeyboardButton(text="📝 Создание моно-форм", callback_data="tech_mono_forms")],
-        [InlineKeyboardButton(text="🌐 Сайт 71-75 отдела", callback_data="tech_site")],
-        [InlineKeyboardButton(text="🔒 VPN 71-75 отдела", callback_data="tech_vpn")],
-        [InlineKeyboardButton(text="⬅️ Вернуться на главную", callback_data="back_to_main")]
+        [InlineKeyboardButton(text="Аналитика IP", callback_data="tech_ip_analytics")],
+        [InlineKeyboardButton(text="Создание форм", callback_data="tech_mono_forms")],
+        [InlineKeyboardButton(text="Сайт 71-75 отдела", callback_data="tech_site")],
+        [InlineKeyboardButton(text="VPN 71-75 отдела", callback_data="tech_vpn")],
+        [InlineKeyboardButton(text="Вернуться на главную", callback_data="back_to_main")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_cancel_keyboard(callback_data: str = "cancel_ip_input") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="❌ Отмена", callback_data=callback_data)]
+        [InlineKeyboardButton(text="Вернуться назад", callback_data=callback_data)]
     ])
 
 def get_form_commands_keyboard() -> InlineKeyboardMarkup:
     buttons = [
         [InlineKeyboardButton(text="/permban", callback_data="cmd_permban")],
         [InlineKeyboardButton(text="/ban", callback_data="cmd_ban")],
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_form_input")]
+        [InlineKeyboardButton(text="Вернуться назад", callback_data="cancel_form_input")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -71,7 +71,7 @@ async def command_start_handler(message: Message) -> None:
     user_name = message.from_user.first_name
     text = (
         f"👋🏻 Привет, {html.bold(user_name)}!\n\n"
-        f"Ты попал в официальный бот технического отдела 71-75. "
+        f"Данный бот был создан для технического отдела 71-75. "
         f"Для открытия панели — /panel\n\n\n"
         f"Твоя роль: Зам. куратора тех. специалистов"
     )
@@ -104,7 +104,7 @@ async def process_back_to_main(callback: CallbackQuery) -> None:
 
 @dp.callback_query(F.data == "settings_section")
 async def process_settings(callback: CallbackQuery) -> None:
-    await callback.answer("⚙️ Раздел 'Настройки' находится в разработке.", show_alert=True)
+    await callback.answer("Раздел 'Настройки' находится в разработке.", show_alert=True)
 
 @dp.callback_query(F.data == "cancel_ip_input")
 async def cancel_ip_input(callback: CallbackQuery, state: FSMContext) -> None:
@@ -161,40 +161,40 @@ async def process_command_by_button(callback: CallbackQuery, state: FSMContext) 
     
     if command == "/ban":
         await state.set_state(BlockForm.waiting_for_days)
-        await callback.message.edit_text(text="⏳ Введите количество дней блокировки (например: `30`):", reply_markup=get_cancel_keyboard("cancel_form_input"), parse_mode="Markdown")
+        await callback.message.edit_text(text="Введи количество дней блокировки (например: `30`):", reply_markup=get_cancel_keyboard("cancel_form_input"), parse_mode="Markdown")
     else:
         await state.set_state(BlockForm.waiting_for_reason)
-        await callback.message.edit_text(text="⚖️ Введите причину блокировки (например: `2.28 Покупка ИВ`):", reply_markup=get_cancel_keyboard("cancel_form_input"), parse_mode="Markdown")
+        await callback.message.edit_text(text="Введи причину блокировки (например: `2.28 Покупка ИВ`):", reply_markup=get_cancel_keyboard("cancel_form_input"), parse_mode="Markdown")
     await callback.answer()
 
 @dp.message(BlockForm.waiting_for_command)
 async def process_command_by_text(message: Message, state: FSMContext) -> None:
     command = message.text.strip().lower()
     if command not in ["/ban", "/permban"]:
-        await message.answer("❌ Неизвестная команда. Пожалуйста, введите `/ban` или `/permban`:")
+        await message.answer("Неизвестная команда. Пожалуйста, нажми`/ban` или `/permban`:")
         return
         
     await state.update_data(chosen_command=command)
     if command == "/ban":
         await state.set_state(BlockForm.waiting_for_days)
-        await message.answer("⏳ Введите количество дней блокировки (например: `30`):", reply_markup=get_cancel_keyboard("cancel_form_input"))
+        await message.answer("Введи количество дней блокировки (например: `30`):", reply_markup=get_cancel_keyboard("cancel_form_input"))
     else:
         await state.set_state(BlockForm.waiting_for_reason)
-        await message.answer("⚖️ Введите причину блокировки (например: `2.28 Покупка ИВ`):", reply_markup=get_cancel_keyboard("cancel_form_input"))
+        await message.answer("Введи причину блокировки (например: `2.28 Покупка ИВ`):", reply_markup=get_cancel_keyboard("cancel_form_input"))
 
 @dp.message(BlockForm.waiting_for_days)
 async def process_days(message: Message, state: FSMContext) -> None:
     days = message.text.strip()
     await state.update_data(block_days=days)
     await state.set_state(BlockForm.waiting_for_reason)
-    await message.answer("⚖️ Введите причину блокировки (например: `2.28 Покупка ИВ`):", reply_markup=get_cancel_keyboard("cancel_form_input"))
+    await message.answer("Введи причину блокировки (например: `2.28 Покупка ИВ`):", reply_markup=get_cancel_keyboard("cancel_form_input"))
 
 @dp.message(BlockForm.waiting_for_reason)
 async def process_reason(message: Message, state: FSMContext) -> None:
     reason = message.text.strip()
     await state.update_data(block_reason=reason)
     await state.set_state(BlockForm.waiting_for_nicknames)
-    await message.answer("👤 Введите список ников (через пробел или запятую):", reply_markup=get_cancel_keyboard("cancel_form_input"))
+    await message.answer("Введи список ников (через пробел или запятую):", reply_markup=get_cancel_keyboard("cancel_form_input"))
 
 @dp.message(BlockForm.waiting_for_nicknames)
 async def process_nicknames(message: Message, state: FSMContext) -> None:
@@ -202,7 +202,7 @@ async def process_nicknames(message: Message, state: FSMContext) -> None:
     nicknames = [nick.strip() for nick in raw_text.split() if nick.strip()]
     
     if not nicknames:
-        await message.answer("❌ Вы не ввели ни одного никнейма. Попробуйте еще раз:")
+        await message.answer("❌ Ты не ввел ни одного никнейма. Попробуй еще раз:")
         return
         
     user_data = await state.get_data()
@@ -210,7 +210,7 @@ async def process_nicknames(message: Message, state: FSMContext) -> None:
     reason = user_data.get("block_reason")
     days = user_data.get("block_days", "")
     
-    final_text = "📋 **Готовые моно-форм (нажмите для копирования):**\n\n"
+    final_text = "📋 **Твои формы готовы (нажми для копирования):**\n\n"
     
     for nick in nicknames:
         if command == "/ban":
@@ -228,10 +228,10 @@ async def analyze_ip_message(message: Message, state: FSMContext) -> None:
     ip_list = [ip.strip() for ip in message.text.split() if ip.strip()]
     
     if not ip_list:
-        await message.answer("❌ Вы не ввели ни одного IP-адреса. Попробуйте еще раз.")
+        await message.answer("Ты не ввел ни одного IP-адреса. Попробуйте еще раз.")
         return
 
-    status_message = await message.answer("🔄 Анализируем IP-адреса...")
+    status_message = await message.answer("🔄 Анализирую IP-адреса...")
     final_report = "⚙️ Информация о IP-адресах:\n\n"
     valid_coordinates = []
     
@@ -304,7 +304,7 @@ async def analyze_ip_message(message: Message, state: FSMContext) -> None:
                 final_report += f"IP {idx}: {ip_address}\n❌ Технический сбой сети:\n`{str(e)}`\n\n"
 
     if len(valid_coordinates) >= 2:
-        final_report += "📐 Расстояния:\n"
+        final_report += "Расстояния:\n"
         for i in range(len(valid_coordinates)):
             for j in range(len(valid_coordinates)):
                 if i != j:
