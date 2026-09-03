@@ -1,34 +1,43 @@
 import asyncio
 import logging
+import aiohttp
 from aiogram import Bot, Dispatcher, html, F
 from aiogram.filters import CommandStart, Command
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import StatesGroup, State
 
-# Токен вашего бота уже установлен
 TOKEN = "8929522753:AAG4rb7zImXg2cfzQU9azjeMpRK7KTwnunE"
 
 dp = Dispatcher()
 
+# Состояние ожидания ввода IP
+class IPForm(StatesGroup):
+    waiting_for_ip = State()
+
 # --- КЛАВИАТУРЫ ---
 
-# Главное меню панели
 def get_main_panel() -> InlineKeyboardMarkup:
     buttons = [
-        [InlineKeyboardButton(text="🛠 Технический раздел", callback_with_text="tech_section")],
-        [InlineKeyboardButton(text="⚙️ Настройки", callback_data="settings_section")]
+        [InlineKeyboardButton(text="Технический раздел", callback_data="tech_section")],
+        [InlineKeyboardButton(text="Настройки", callback_data="settings_section")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-# Меню технического раздела
 def get_tech_panel() -> InlineKeyboardMarkup:
     buttons = [
-        [InlineKeyboardButton(text="📊 Аналитика IP", callback_data="tech_ip_analytics")],
-        [InlineKeyboardButton(text="📄 Создание моно-форм", callback_data="tech_mono_forms")],
-        [InlineKeyboardButton(text="🌐 Сайт 71-75", callback_data="tech_site")],
-        [InlineKeyboardButton(text="🔒 VPN 71-75 отдела", callback_data="tech_vpn")],
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")]
+        [InlineKeyboardButton(text="Аналитика IP", callback_data="tech_ip_analytics")],
+        [InlineKeyboardButton(text="Создание моно-форм", callback_data="tech_mono_forms")],
+        [InlineKeyboardButton(text="Сайт 71-75 отдела", callback_data="tech_site")],
+        [InlineKeyboardButton(text="VPN 71-75 отдела", callback_data="tech_vpn")],
+        [InlineKeyboardButton(text="Вернуться на главную", callback_data="back_to_main")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_cancel_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_ip_input")]
+    ])
 
 
 # --- ОБРАБОТЧИКИ КОМАНД ---
@@ -39,7 +48,6 @@ async def command_start_handler(message: Message) -> None:
     text = (
         f"👋🏻 Привет, {html.bold(user_name)}!\n\n"
         f"Ты попал в официальный бот технического отдела 71-75. "
-        f"Для получения более подробной информации введи /help.\n"
         f"Для открытия панели — /panel\n\n\n"
         f"Твоя роль: Зам. куратора тех. специалистов"
     )
@@ -47,55 +55,137 @@ async def command_start_handler(message: Message) -> None:
 
 
 @dp.message(Command("panel"))
-async def command_panel_handler(message: Message) -> None:
+async def command_panel_handler(message: Message, state: FSMContext) -> None:
+    await state.clear()
     await message.answer(
-        text="💼 Вам нужно выбрать нужный пункт:",
+        text="Тебе нужно выбрать нужный пункт:",
         reply_markup=get_main_panel()
     )
 
 
 # --- ОБРАБОТЧИКИ НАЖАТИЙ НА КНОПКИ (CALLBACK QUERIES) ---
 
-# Переход в Технический раздел
 @dp.callback_query(F.data == "tech_section")
 async def process_tech_section(callback: CallbackQuery) -> None:
     await callback.message.edit_text(
-        text="🛠 **Технический раздел**\nВыберите интересующий подраздел:",
+        text=" **Ты выбрал технический раздел**\nВыбери интересующий пункт:",
         reply_markup=get_tech_panel(),
         parse_mode="Markdown"
     )
     await callback.answer()
 
 
-# Возврат в главное меню панели из технического раздела
 @dp.callback_query(F.data == "back_to_main")
 async def process_back_to_main(callback: CallbackQuery) -> None:
     await callback.message.edit_text(
-        text="💼 Вам нужно выбрать нужный пункт:",
+        text="Тебе нужно выбрать нужный пункт:",
         reply_markup=get_main_panel()
     )
     await callback.answer()
 
 
-# Заглушка для Настроек
 @dp.callback_query(F.data == "settings_section")
 async def process_settings(callback: CallbackQuery) -> None:
     await callback.answer("⚙️ Раздел 'Настройки' находится в разработке.", show_alert=True)
 
 
-# Заглушки для внутренних кнопок Технического раздела
+# НАЖАТИЕ НА КНОПКУ АНАЛИТИКА IP
+@dp.callback_query(F.data == "tech_ip_analytics")
+async def process_ip_analytics(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.set_state(IPForm.waiting_for_ip)
+    
+    # Текст изменен строго по вашему запросу
+    await callback.message.edit_text(
+        text="Пожалуйста, введи IP-адрес или несколько через пробел.",
+        reply_markup=get_cancel_keyboard()
+    )
+
+
+@dp.callback_query(F.data == "cancel_ip_input")
+async def cancel_ip_input(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await callback.message.edit_text(
+        text=" **Ты выбрал технический раздел**\nВыбери интересующий пункт:",
+        reply_markup=get_tech_panel(),
+        parse_mode="Markdown"
+    )
+    await callback.answer("Ввод IP отменен")
+
+
 @dp.callback_query(F.data.startswith("tech_"))
 async def process_tech_buttons(callback: CallbackQuery) -> None:
-    # Определяем, какая именно кнопка была нажата, чтобы показать точечный ответ
     actions = {
-        "tech_ip_analytics": "Запуск Аналитики IP...",
         "tech_mono_forms": "Открытие конструктора моно-форм...",
         "tech_site": "Переход на сайт 71-75...",
         "tech_vpn": "Подключение к VPN 71-75 отдела..."
     }
     action_text = actions.get(callback.data, "Раздел в разработке.")
-    
     await callback.answer(action_text, show_alert=True)
+
+
+# --- ОБРАБОТКА ВВЕДЕННЫХ IP-АДРЕСОВ ---
+
+@dp.message(IPForm.waiting_for_ip)
+async def analyze_ip_message(message: Message, state: FSMContext) -> None:
+    # Разделяем входящее сообщение по пробелам, убирая лишние пустоты
+    ip_list = [ip.strip() for ip in message.text.split() if ip.strip()]
+    
+    if not ip_list:
+        await message.answer("❌ Вы не ввели ни одного IP-адреса. Попробуйте еще раз.")
+        return
+
+    status_message = await message.answer("🔄 Запрос к базе данных, проверка IP...")
+    
+    final_report = " Информация о IP-адресах:\n\n"
+    
+    async with aiohttp.ClientSession() as session:
+        for idx, ip_address in enumerate(ip_list, start=1):
+            api_url = f"http://ip-api.com{ip_address}?fields=status,country,regionName,city,isp,as,hosting"
+            
+            try:
+                async with session.get(api_url) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        
+                        if data.get("status") == "fail":
+                            final_report += f"**IP {idx}**: `{ip_address}`\n❌ Ошибка: Неверный формат IP-адреса\n\n"
+                            continue
+                        
+                        country = data.get("country", "Не определено")
+                        region = data.get("regionName", "Не определено")
+                        city = data.get("city", "Не определено")
+                        isp = data.get("isp", "Не определено")
+                        as_info = data.get("as", "Не определено")
+                        
+                        is_hosting = data.get("hosting", False)
+                        vpn_status = "VPN используется" if is_hosting else "VPN не обнаружен / Чистый residential"
+                        internet_type = "Дата-центр / Хостинг" if is_hosting else "Мобильный / Домашний интернет"
+                        
+                        # Собираем блок данных для текущего IP по вашему шаблону
+                        final_report += (
+                            f"**IP {idx}**: `{ip_address}`\n"
+                            f"**Страна**: {country}\n"
+                            f"**Регион**: {region}\n"
+                            f"**Город**: {city}\n"
+                            f"**VPN**: {vpn_status}\n\n"
+                            f"Дополнительно:\n"
+                            f"**Провайдер**: {isp}\n"
+                            f"**Доп. инфа**: {as_info}\n"
+                            f"**Интернет**: {internet_type}\n"
+                            f"**VPN используется**: {'Да' if is_hosting else 'Нет'}\n\n"
+                            f"⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n\n"
+                        )
+                    else:
+                        final_report += f"**IP {idx}**: `{ip_address}`\n❌ Ошибка сервера аналитики\n\n"
+            except Exception as e:
+                logging.error(f"Error checking IP {ip_address}: {e}")
+                final_report += f"**IP {idx}**: `{ip_address}`\n❌ Внутренняя ошибка сети\n\n"
+
+    # Отправляем готовый отчет пользователю
+    await status_message.edit_text(final_report, parse_mode="Markdown")
+    # Закрываем состояние ожидания
+    await state.clear()
 
 
 # --- ЗАПУСК БОТА ---
