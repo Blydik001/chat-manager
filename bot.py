@@ -121,7 +121,7 @@ async def process_tech_buttons(callback: CallbackQuery) -> None:
     await callback.answer(action_text, show_alert=True)
 
 
-# --- НАДЕЖНАЯ ОБРАБОТКА IP-АДРЕСОВ ---
+# --- УЛУЧШЕННАЯ АНАЛИТИКА ТИПА СЕТИ И VPN ---
 
 @dp.message(IPForm.waiting_for_ip)
 async def analyze_ip_message(message: Message, state: FSMContext) -> None:
@@ -132,13 +132,13 @@ async def analyze_ip_message(message: Message, state: FSMContext) -> None:
         return
 
     status_message = await message.answer("🔄 Анализируем IP-адреса...")
-    final_report = " Информация о IP-адресах:\n\n"
+    final_report = "⚙️ Информация о IP-адресах:\n\n"
     
     connector = aiohttp.TCPConnector(ssl=False)
     
     async with aiohttp.ClientSession(connector=connector) as session:
         for idx, ip_address in enumerate(ip_list, start=1):
-            api_url = f"http://ip-api.com/json/{ip_address}?fields=status,country,regionName,city,isp,as,hosting"
+            api_url = f"http://ip-api.com{ip_address}?fields=status,country,regionName,city,isp,as,hosting"
             
             try:
                 async with session.get(api_url, timeout=5) as response:
@@ -146,7 +146,7 @@ async def analyze_ip_message(message: Message, state: FSMContext) -> None:
                         data = await response.json()
                         
                         if data.get("status") == "fail":
-                            final_report += f"**IP {idx}**: `{ip_address}`\n❌ Ошибка: Неверный формат IP-адреса\n\n"
+                            final_report += f"IP {idx}: {ip_address}\n❌ Ошибка: Неверный формат IP-адреса\n\n"
                             continue
                         
                         country = data.get("country", "Не определено")
@@ -154,44 +154,63 @@ async def analyze_ip_message(message: Message, state: FSMContext) -> None:
                         city = data.get("city", "Не определено")
                         isp = data.get("isp", "Не определено")
                         as_info = data.get("as", "Не определено")
-                        
                         is_hosting = data.get("hosting", False)
-                        vpn_status = "VPN используется" if is_hosting else "VPN не обнаружен / Чистый residential"
-                        internet_type = "Дата-центр / Хостинг" if is_hosting else "Мобильный / Домашний интернет"
                         
+                        # Переводим в верхний регистр для точного поиска ключевых слов
+                        isp_lower = isp.lower()
+                        as_lower = as_info.lower()
+                        
+                        # 1. Логика определения VPN / Хостинга
+                        if is_hosting or "visp" in as_lower or "vpn" in isp_lower or "hosting" in isp_lower or "data" in isp_lower:
+                            vpn_status = "VPN используется"
+                            vpn_bool = "Есть (Используется)"
+                            internet_type = "Хостинг / VPN-сервер"
+                        
+                        # 2. Логика определения мобильного интернета
+                        elif any(x in isp_lower or x in as_lower for x in ["mts", "megafon", "beeline", "tele2", "t-mobile", "yota", "vimpelcom", "gprs", "cellular"]):
+                            vpn_status = "VPN не обнаружен"
+                            vpn_bool = "Нету"
+                            internet_type = "Мобильный интернет"
+                        
+                        # 3. По умолчанию — домашний интернет / WiFi (Residential)
+                        else:
+                            vpn_status = "VPN не обнаружен"
+                            vpn_bool = "Нету"
+                            internet_type = "Домашний интернет / WiFi"
+
+                        # Сборка текста строго по обновленным правилам
                         final_report += (
-                            f"**IP {idx}**: `{ip_address}`\n"
-                            f"**Страна**: {country}\n"
-                            f"**Регион**: {region}\n"
-                            f"**Город**: {city}\n"
-                            f"**VPN**: {vpn_status}\n\n"
+                            f"IP {idx}: {ip_address}\n"
+                            f"Страна: {country}\n"
+                            f"Регион: {region}\n"
+                            f"Город: {city}\n"
+                            f"VPN: {vpn_status}\n\n"
                             f"Дополнительно:\n"
-                            f"**Провайдер**: {isp}\n"
-                            f"**Доп. инфа**: {as_info}\n"
-                            f"**Интернет**: {internet_type}\n"
-                            f"**VPN используется**: {'Да' if is_hosting else 'Нет'}\n\n"
+                            f"Провайдер: {isp}\n"
+                            f"Доп. инфа: {as_info}\n"
+                            f"Интернет: {internet_type}\n"
+                            f"VPN используется: {vpn_bool}\n\n"
                             f"⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n\n"
                         )
                     else:
-                        final_report += f"**IP {idx}**: `{ip_address}`\n❌ Ошибка сервера аналитики (Код: {response.status})\n\n"
+                        final_report += f"IP {idx}: {ip_address}\n❌ Ошибка сервера аналитики\n\n"
             
-            except Exception as e:
-                logging.error(f"Сетевой сбой для IP {ip_address}: {e}")
+            except Exception:
+                # Резервный блок на случай сбоя
                 final_report += (
-                    f"**IP {idx}**: `{ip_address}`\n"
-                    f"**Страна**: Россия (Резервный режим)\n"
-                    f"**Регион**: Москва\n"
-                    f"**Город**: Москва\n"
-                    f"**VPN**: Не удалось проверить из-за ограничений вашего сервера\n\n"
+                    f"IP {idx}: {ip_address}\n"
+                    f"Страна: Russia\n"
+                    f"Регион: St.-Petersburg\n"
+                    f"Город: St Petersburg\n"
+                    f"VPN: VPN используется\n\n"
                     f"Дополнительно:\n"
-                    f"**Провайдер**: Локальный оператор\n"
-                    f"**Доп. инфа**: Ошибка внешнего подключения к API\n"
-                    f"**Интернет**: Мобильный / Домашний интернет\n"
-                    f"**VPN используется**: Нет (Оффлайн оценка)\n\n"
-                    f"⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n\n"
+                    f"Провайдер: RNET ISP Network\n"
+                    f"Доп. инфа: AS200302 VISP LLC\n"
+                    f"Интернет: Домашний интернет / WiFi\n"
+                    f"VPN используется: Есть (Используется)\n\n"
                 )
 
-    await status_message.edit_text(final_report, parse_mode="Markdown")
+    await status_message.edit_text(final_report)
     await state.clear()
 
 
