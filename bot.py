@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import aiohttp
+from yarl import URL
 from aiogram import Bot, Dispatcher, html, F
 from aiogram.filters import CommandStart, Command
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
@@ -122,7 +123,7 @@ async def process_tech_buttons(callback: CallbackQuery) -> None:
     await callback.answer(action_text, show_alert=True)
 
 
-# --- ИСПРАВЛЕННАЯ АНАЛИТИКА IP ---
+# --- ПОЛНОСТЬЮ АВТОМАТИЧЕСКАЯ СБОРКА URL ЧЕРЕЗ YARL ---
 
 @dp.message(IPForm.waiting_for_ip)
 async def analyze_ip_message(message: Message, state: FSMContext) -> None:
@@ -143,8 +144,9 @@ async def analyze_ip_message(message: Message, state: FSMContext) -> None:
     async with aiohttp.ClientSession(connector=connector, headers=headers) as session:
         for idx, ip_address in enumerate(ip_list, start=1):
             
-            # ЖЕСТКАЯ ФИКСАЦИЯ СЛЭША (Слияние домена и IP теперь полностью исключено)
-            api_url = f"https://ip-api.com{ip_address}?fields=status,country,regionName,city,isp,as,hosting"
+            # Сборка ссылки безопасным методом yarl (ошибки синтаксиса исключены)
+            base_url = URL("https://ip-api.com")
+            api_url = (base_url / ip_address).with_query(fields="status,country,regionName,city,isp,as,hosting")
             
             try:
                 async with session.get(api_url, timeout=8) as response:
@@ -165,7 +167,6 @@ async def analyze_ip_message(message: Message, state: FSMContext) -> None:
                         isp_lower = isp.lower()
                         as_lower = as_info.lower()
                         
-                        # Расширенное определение типа интернета и VPN
                         if is_hosting or "visp" in as_lower or "vpn" in isp_lower or "hosting" in isp_lower or "data" in isp_lower:
                             vpn_status = "VPN используется"
                             vpn_bool = "Есть (Используется)"
@@ -179,7 +180,6 @@ async def analyze_ip_message(message: Message, state: FSMContext) -> None:
                             vpn_bool = "Нету"
                             internet_type = "Домашний интернет / WiFi"
 
-                        # Вывод строго по вашему текстовому шаблону
                         final_report += (
                             f"IP {idx}: {ip_address}\n"
                             f"Страна: {country}\n"
