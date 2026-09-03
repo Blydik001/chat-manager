@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import traceback
 import aiohttp
 from aiogram import Bot, Dispatcher, html, F
 from aiogram.filters import CommandStart, Command
@@ -121,7 +122,7 @@ async def process_tech_buttons(callback: CallbackQuery) -> None:
     await callback.answer(action_text, show_alert=True)
 
 
-# --- УЛУЧШЕННАЯ АНАЛИТИКА ТИПА СЕТИ И VPN ---
+# --- ОТЛАДОЧНАЯ АНАЛИТИКА IP ---
 
 @dp.message(IPForm.waiting_for_ip)
 async def analyze_ip_message(message: Message, state: FSMContext) -> None:
@@ -134,14 +135,21 @@ async def analyze_ip_message(message: Message, state: FSMContext) -> None:
     status_message = await message.answer("🔄 Анализируем IP-адреса...")
     final_report = "⚙️ Информация о IP-адресах:\n\n"
     
+    # Отключаем проверку SSL
     connector = aiohttp.TCPConnector(ssl=False)
     
-    async with aiohttp.ClientSession(connector=connector) as session:
+    # Добавляем заголовки реального браузера, чтобы исключить блокировки от API-сервера
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    
+    async with aiohttp.ClientSession(connector=connector, headers=headers) as session:
         for idx, ip_address in enumerate(ip_list, start=1):
-            api_url = f"http://ip-api.com{ip_address}?fields=status,country,regionName,city,isp,as,hosting"
+            # Переключено на стабильный HTTPS
+            api_url = f"https://ip-api.com{ip_address}?fields=status,country,regionName,city,isp,as,hosting"
             
             try:
-                async with session.get(api_url, timeout=5) as response:
+                async with session.get(api_url, timeout=8) as response:
                     if response.status == 200:
                         data = await response.json()
                         
@@ -156,29 +164,22 @@ async def analyze_ip_message(message: Message, state: FSMContext) -> None:
                         as_info = data.get("as", "Не определено")
                         is_hosting = data.get("hosting", False)
                         
-                        # Переводим в верхний регистр для точного поиска ключевых слов
                         isp_lower = isp.lower()
                         as_lower = as_info.lower()
                         
-                        # 1. Логика определения VPN / Хостинга
                         if is_hosting or "visp" in as_lower or "vpn" in isp_lower or "hosting" in isp_lower or "data" in isp_lower:
                             vpn_status = "VPN используется"
                             vpn_bool = "Есть (Используется)"
                             internet_type = "Хостинг / VPN-сервер"
-                        
-                        # 2. Логика определения мобильного интернета
                         elif any(x in isp_lower or x in as_lower for x in ["mts", "megafon", "beeline", "tele2", "t-mobile", "yota", "vimpelcom", "gprs", "cellular"]):
                             vpn_status = "VPN не обнаружен"
                             vpn_bool = "Нету"
                             internet_type = "Мобильный интернет"
-                        
-                        # 3. По умолчанию — домашний интернет / WiFi (Residential)
                         else:
                             vpn_status = "VPN не обнаружен"
                             vpn_bool = "Нету"
                             internet_type = "Домашний интернет / WiFi"
 
-                        # Сборка текста строго по обновленным правилам
                         final_report += (
                             f"IP {idx}: {ip_address}\n"
                             f"Страна: {country}\n"
@@ -193,24 +194,15 @@ async def analyze_ip_message(message: Message, state: FSMContext) -> None:
                             f"⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n\n"
                         )
                     else:
-                        final_report += f"IP {idx}: {ip_address}\n❌ Ошибка сервера аналитики\n\n"
+                        final_report += f"IP {idx}: {ip_address}\n❌ Сервер ответил кодом: {response.status}\n\n"
             
-            except Exception:
-                # Резервный блок на случай сбоя
-                final_report += (
-                    f"IP {idx}: {ip_address}\n"
-                    f"Страна: Russia\n"
-                    f"Регион: St.-Petersburg\n"
-                    f"Город: St Petersburg\n"
-                    f"VPN: VPN используется\n\n"
-                    f"Дополнительно:\n"
-                    f"Провайдер: RNET ISP Network\n"
-                    f"Доп. инфа: AS200302 VISP LLC\n"
-                    f"Интернет: Домашний интернет / WiFi\n"
-                    f"VPN используется: Есть (Используется)\n\n"
-                )
+            except Exception as e:
+                # ВМЕСТО РЕЗЕРВА: Бот теперь выведет точную техническую ошибку прямо в чат!
+                error_trace = traceback.format_exc()
+                logging.error(f"Сбой при проверке IP {ip_address}:\n{error_trace}")
+                final_report += f"IP {idx}: {ip_address}\n❌ Технический сбой сети:\n`{str(e)}`\n\n"
 
-    await status_message.edit_text(final_report)
+    await status_message.edit_text(final_report, parse_mode="Markdown")
     await state.clear()
 
 
