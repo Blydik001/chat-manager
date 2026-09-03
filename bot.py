@@ -1,6 +1,8 @@
 import asyncio
 import logging
 import aiohttp
+import json
+import math
 from aiogram import Bot, Dispatcher, html, F
 from aiogram.filters import CommandStart, Command
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
@@ -14,6 +16,29 @@ dp = Dispatcher()
 
 class IPForm(StatesGroup):
     waiting_for_ip = State()
+
+
+# --- ФУНКЦИЯ ДЛЯ РАСЧЕТА РАССТОЯНИЯ (ФОРМУЛА ГАВЕРСИНУСОВ) ---
+def calculate_haversine(lat1, lon1, lat2, lon2):
+    """Вычисляет расстояние между двумя точками на Земле в километрах"""
+    # Радиус Земли в километрах
+    R = 6371.0
+    
+    # Перевод градусов в радианы
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+    
+    # Формула гаверсинусов
+    a = math.sin(delta_phi / 2.0) ** 2 + \
+        math.cos(phi1) * math.cos(phi2) * \
+        math.sin(delta_lambda / 2.0) ** 2
+        
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    distance = R * c
+    return round(distance, 3)
+
 
 # --- КЛАВИАТУРЫ ---
 
@@ -36,7 +61,7 @@ def get_tech_panel() -> InlineKeyboardMarkup:
 
 def get_cancel_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_ip_input")]
+        [InlineKeyboardButton(text="Вернуться на главную", callback_data="cancel_ip_input")]
     ])
 
 
@@ -122,7 +147,7 @@ async def process_tech_buttons(callback: CallbackQuery) -> None:
     await callback.answer(action_text, show_alert=True)
 
 
-# --- СТАБИЛЬНЫЙ ОБРАБОТЧИК АНАЛИТИКИ IP (ЧЕРЕЗ IPWHOIS) ---
+# --- ОБРАБОТЧИК АНАЛИТИКИ IP С РАСЧЕТОМ РАССТОЯНИЯ ---
 
 @dp.message(IPForm.waiting_for_ip)
 async def analyze_ip_message(message: Message, state: FSMContext) -> None:
@@ -135,43 +160,50 @@ async def analyze_ip_message(message: Message, state: FSMContext) -> None:
     status_message = await message.answer("🔄 Анализируем IP-адреса...")
     final_report = "⚙️ Информация о IP-адресах:\n\n"
     
+    valid_coordinates = []
+    
     connector = aiohttp.TCPConnector(ssl=False)
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
     
     async with aiohttp.ClientSession(connector=connector, headers=headers) as session:
         for idx, ip_address in enumerate(ip_list, start=1):
-            
-            # Новый стабильный и проверенный API-хост
             api_url = f"https://ipwhois.app/json/{ip_address}"
             
             try:
                 async with session.get(api_url, timeout=8) as response:
                     if response.status == 200:
-                        # Защита от сбоя миме-типа: принудительно парсим строку
                         response_text = await response.text()
-                        import json
                         data = json.loads(response_text)
                         
                         if data.get("success") is False:
                             final_report += f"IP {idx}: {ip_address}\n❌ Ошибка: Неверный формат IP-адреса\n\n"
                             continue
                         
-                        # Собираем данные у API ipwhois
                         country = data.get("country", "Не определено")
                         region = data.get("region", "Не определено")
                         city = data.get("city", "Не определено")
                         isp = data.get("isp", "Не определено")
                         as_info = data.get("asn", "Не определено")
                         
-                        # Анализ флага безопасности (proxy/vpn/hosting)
+                        lat = data.get("latitude")
+                        lon = data.get("longitude")
+                        if lat is not None and lon is not None:
+                            try:
+                                valid_coordinates.append({
+                                    "ip": ip_address,
+                                    "lat": float(lat),
+                                    "lon": float(lon)
+                                })
+                            except ValueError:
+                                pass
+                        
                         is_hosting = data.get("security", {}).get("hosting", False) or data.get("security", {}).get("proxy", False)
                         
                         isp_lower = isp.lower()
                         as_lower = as_info.lower()
                         
-                        # Проверка флагов под ваш шаблон
                         if is_hosting or "visp" in as_lower or "vpn" in isp_lower or "hosting" in isp_lower or "data" in isp_lower:
                             vpn_status = "VPN используется"
                             vpn_bool = "Есть (Используется)"
@@ -196,7 +228,6 @@ async def analyze_ip_message(message: Message, state: FSMContext) -> None:
                             f"Доп. инфа: {as_info}\n"
                             f"Интернет: {internet_type}\n"
                             f"VPN используется: {vpn_bool}\n\n"
-                            f"⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n\n"
                         )
                     else:
                         final_report += f"IP {idx}: {ip_address}\n❌ Сервер ответил кодом: {response.status}\n\n"
@@ -204,6 +235,17 @@ async def analyze_ip_message(message: Message, state: FSMContext) -> None:
             except Exception as e:
                 logging.error(f"Сбой при проверке IP {ip_address}: {e}")
                 final_report += f"IP {idx}: {ip_address}\n❌ Технический сбой сети:\n`{str(e)}`\n\n"
+
+    if len(valid_coordinates) >= 2:
+        final_report += " Расстояния:\n"
+        for i in range(len(valid_coordinates)):
+            for j in range(len(valid_coordinates)):
+                if i != j:
+                    loc1 = valid_coordinates[i]
+                    loc2 = valid_coordinates[j]
+                    dist = calculate_haversine(loc1["lat"], loc1["lon"], loc2["lat"], loc2["lon"])
+                    final_report += f"Расстояние между IP {loc1['ip']} и {loc2['ip']}: {dist} км\n"
+        final_report += "\n"
 
     await status_message.edit_text(final_report)
     await state.clear()
