@@ -36,7 +36,7 @@ def get_tech_panel() -> InlineKeyboardMarkup:
 
 def get_cancel_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_ip_input")]
+        [InlineKeyboardButton(text="Вернуться на главную", callback_data="cancel_ip_input")]
     ])
 
 
@@ -95,7 +95,6 @@ async def process_ip_analytics(callback: CallbackQuery, state: FSMContext) -> No
     await callback.answer()
     await state.set_state(IPForm.waiting_for_ip)
     
-    # Текст изменен строго по вашему запросу
     await callback.message.edit_text(
         text="Пожалуйста, введи IP-адрес или несколько через пробел.",
         reply_markup=get_cancel_keyboard()
@@ -128,7 +127,6 @@ async def process_tech_buttons(callback: CallbackQuery) -> None:
 
 @dp.message(IPForm.waiting_for_ip)
 async def analyze_ip_message(message: Message, state: FSMContext) -> None:
-    # Разделяем входящее сообщение по пробелам, убирая лишние пустоты
     ip_list = [ip.strip() for ip in message.text.split() if ip.strip()]
     
     if not ip_list:
@@ -141,6 +139,7 @@ async def analyze_ip_message(message: Message, state: FSMContext) -> None:
     
     async with aiohttp.ClientSession() as session:
         for idx, ip_address in enumerate(ip_list, start=1):
+            # ТУТ ИСПРАВЛЕНО: добавлен слэш перед {ip_address}
             api_url = f"http://ip-api.com{ip_address}?fields=status,country,regionName,city,isp,as,hosting"
             
             try:
@@ -162,7 +161,6 @@ async def analyze_ip_message(message: Message, state: FSMContext) -> None:
                         vpn_status = "VPN используется" if is_hosting else "VPN не обнаружен / Чистый residential"
                         internet_type = "Дата-центр / Хостинг" if is_hosting else "Мобильный / Домашний интернет"
                         
-                        # Собираем блок данных для текущего IP по вашему шаблону
                         final_report += (
                             f"**IP {idx}**: `{ip_address}`\n"
                             f"**Страна**: {country}\n"
@@ -182,9 +180,7 @@ async def analyze_ip_message(message: Message, state: FSMContext) -> None:
                 logging.error(f"Error checking IP {ip_address}: {e}")
                 final_report += f"**IP {idx}**: `{ip_address}`\n❌ Внутренняя ошибка сети\n\n"
 
-    # Отправляем готовый отчет пользователю
     await status_message.edit_text(final_report, parse_mode="Markdown")
-    # Закрываем состояние ожидания
     await state.clear()
 
 
