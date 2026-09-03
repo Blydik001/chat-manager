@@ -1,43 +1,35 @@
-import vk_api
-from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
+import asyncio
+import logging
+from aiogram import Bot, Dispatcher, html
+from aiogram.filters import CommandStart
+from aiogram.types import Message
 
-# НАСТРОЙКА: Вставьте сюда свои данные
-TOKEN = "vk1.a.1_vaGTlTSVYzOPCjOLr9RTimJfzW7NfEntNrR8cng38hICHY8UI3weotFtkx2DTHMS_JnCQwgv4dmp1zjx9SUqWu_s08AYuuBgIXl3gfH-0H6TEdA-QI54jlBN82FikmQ5SRkRQcBOuD0OmvCUWozIj4XPrN_P7FAkxo8krfGxFogq7yk2waqyfiAlMzy1flcZCMCNlqIkvwqjtZ-0Enww"
-GROUP_ID = 2000000179  # Числовой ID группы (без минуса)
+# Вставьте сюда токен вашего бота, полученный от @BotFather
+TOKEN = "8929522753:AAG4rb7zImXg2cfzQU9azjeMpRK7KTwnunE"
 
-# Текст для команды /help
-HELP_TEXT = (
-    "Команды пользователей:\n"
-    "/info — официальные ресурсы форбса\n"
-    "/id — узнать оригинальный ID пользователя в ВК\n"
-    "/stats — информация о пользователе"
-)
+dp = Dispatcher()
 
-def main():
-    # Авторизация группы
-    vk_session = vk_api.VkApi(token=TOKEN)
-    vk = vk_session.get_api()
+@dp.message(CommandStart())
+async def command_start_handler(message: Message) -> None:
+    # Получаем имя пользователя (выбираем имя, если есть фамилия — добавляем, либо берем username)
+    user_name = message.from_user.first_name
     
-    # Инициализация Long Poll для сообщества
-    longpoll = VkBotLongPoll(vk_session, GROUP_ID)
-    print("Бот успешно запущен через vk_api...")
+    # Формируем текст ответа по вашему шаблону
+    text = (
+        f"👋🏻 Привет, {html.bold(user_name)}!\n\n"
+        f"Ты попал в официальный бот технического отдела 71-75. "
+        f"Для получения более подробной информации введи /help.\n"
+        f"Для открытия панели — /panel\n\n\n"
+        f"Твоя роль: Зам. куратора тех. специалистов"
+    )
+    
+    # Отправляем сообщение с поддержкой HTML-разметки (для жирного шрифта)
+    await message.answer(text, parse_mode="HTML")
 
-    for event in longpoll.listen():
-        # Проверяем, что пришло новое сообщение
-        if event.type == VkBotEventType.MESSAGE_NEW:
-            message_text = event.obj.message['text'].strip()
-            peer_id = event.obj.message['peer_id']
-            
-            # Обработка команды /help
-            if message_text.lower() == "/help":
-                try:
-                    vk.messages.send(
-                        peer_id=peer_id,
-                        message=HELP_TEXT,
-                        random_id=vk_api.utils.get_random_id()
-                    )
-                except Exception as e:
-                    print(f"Ошибка отправки сообщения: {e}")
+async def main() -> None:
+    bot = Bot(token=TOKEN)
+    logging.basicConfig(level=logging.INFO)
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
