@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import aiohttp
-from yarl import URL
 from aiogram import Bot, Dispatcher, html, F
 from aiogram.filters import CommandStart, Command
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
@@ -123,7 +122,7 @@ async def process_tech_buttons(callback: CallbackQuery) -> None:
     await callback.answer(action_text, show_alert=True)
 
 
-# --- ПОЛНОСТЬЮ АВТОМАТИЧЕСКАЯ СБОРКА URL ЧЕРЕЗ YARL ---
+# --- СТАБИЛЬНЫЙ ОБРАБОТЧИК АНАЛИТИКИ IP (ЧЕРЕЗ IPWHOIS) ---
 
 @dp.message(IPForm.waiting_for_ip)
 async def analyze_ip_message(message: Message, state: FSMContext) -> None:
@@ -138,35 +137,41 @@ async def analyze_ip_message(message: Message, state: FSMContext) -> None:
     
     connector = aiohttp.TCPConnector(ssl=False)
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
     
     async with aiohttp.ClientSession(connector=connector, headers=headers) as session:
         for idx, ip_address in enumerate(ip_list, start=1):
             
-            # Сборка ссылки безопасным методом yarl (ошибки синтаксиса исключены)
-            base_url = URL("https://ip-api.com")
-            api_url = (base_url / ip_address).with_query(fields="status,country,regionName,city,isp,as,hosting")
+            # Новый стабильный и проверенный API-хост
+            api_url = f"https://ipwhois.app/json/{ip_address}"
             
             try:
                 async with session.get(api_url, timeout=8) as response:
                     if response.status == 200:
-                        data = await response.json()
+                        # Защита от сбоя миме-типа: принудительно парсим строку
+                        response_text = await response.text()
+                        import json
+                        data = json.loads(response_text)
                         
-                        if data.get("status") == "fail":
+                        if data.get("success") is False:
                             final_report += f"IP {idx}: {ip_address}\n❌ Ошибка: Неверный формат IP-адреса\n\n"
                             continue
                         
+                        # Собираем данные у API ipwhois
                         country = data.get("country", "Не определено")
-                        region = data.get("regionName", "Не определено")
+                        region = data.get("region", "Не определено")
                         city = data.get("city", "Не определено")
                         isp = data.get("isp", "Не определено")
-                        as_info = data.get("as", "Не определено")
-                        is_hosting = data.get("hosting", False)
+                        as_info = data.get("asn", "Не определено")
+                        
+                        # Анализ флага безопасности (proxy/vpn/hosting)
+                        is_hosting = data.get("security", {}).get("hosting", False) or data.get("security", {}).get("proxy", False)
                         
                         isp_lower = isp.lower()
                         as_lower = as_info.lower()
                         
+                        # Проверка флагов под ваш шаблон
                         if is_hosting or "visp" in as_lower or "vpn" in isp_lower or "hosting" in isp_lower or "data" in isp_lower:
                             vpn_status = "VPN используется"
                             vpn_bool = "Есть (Используется)"
